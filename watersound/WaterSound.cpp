@@ -384,6 +384,14 @@ void * init_watersound_processContext(bool gpu)
 	return (void *) space_filter;
 }
 
+void watersound_set_noise_para(void * context, bool enable, float angle)
+{
+	if (context == NULL)
+		return;
+	SpaceFilter * space_filter = (SpaceFilter *)context;
+	space_filter->set_noise_para(enable, angle);
+}
+
 void watersound_process(void * context, float * pcm_input, float * pcm_output)
 {
 	if (context == NULL)
@@ -412,13 +420,23 @@ void * init_watersound_freq_processContext()
 	return (void *)space_freq_filter;
 }
 
+bool l_enable=false, s_enable=false;
+float l_angle, s_angle;
+void watersound_freq_set_noise_para(void *context, bool enable1, float angle1, bool enable2, float angle2)
+{
+	l_enable = enable1;
+	l_angle = angle1;
+	s_enable = enable2;
+	s_angle = angle2;
+}
+
 void watersound_freq_process(void * context, float * input1, float * input2, float * output1, float * output2)
 {
 	if (context == NULL)
 		return;
 	SpaceFilterFreqGPU * space_freq_filter = (SpaceFilterFreqGPU *)context;
-	//space_freq_filter->process(input1, output1, 10, 91, 4);
-	space_freq_filter->process(input2, output2, 399, 3, 2);
+	space_freq_filter->process(input1, output1, 10, 91, 4, l_enable, l_angle, 2);
+	//space_freq_filter->process(input2, output2, 399, 3, 2, s_enable, s_angle, 1);
 }
 
 #ifndef STATIC_LIB
@@ -455,6 +473,7 @@ void test1()
 void test2()
 {
 	void * space_filter_gpu = init_watersound_freq_processContext();
+	watersound_freq_set_noise_para(space_filter_gpu, true, 30, true, 30);
 	float t1_yanci, t2_yanci;
 	t1_yanci = -cos(30 * pi / 180) * 4 / 1500;
 	t2_yanci = -cos(70 * pi / 180) * 4 / 1500;

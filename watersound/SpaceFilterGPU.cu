@@ -111,6 +111,29 @@ __global__ void cuda_space_filter(float * __restrict x, int x_len,
 	}
 }
 
+/* x[i, freq] -= x[i+cd, freq] * e^(delay)
+*/
+__global__ void cuda_freq_cancel_noise(cufftComplex * __restrict x, int x_len, int freq_start, 
+	float angle, int row, float mic_d, int cd)
+{
+	int i;
+	int freq_idx = threadIdx.x + freq_start;
+	float t_offset = mic_d * cd * cos(angle *pi / 180) / 1500 * 2 * pi;
+	cufftComplex t, a, b;
+	t.x = cos(freq_idx * t_offset);
+	t.y = sin(freq_idx * t_offset);
+	for (i = 0; i < row - cd; i++) {
+		a = x[(i+cd)*x_len + freq_idx];
+		b.x = a.x * t.x - a.y * t.y;
+		b.y = a.x * t.y + a.y * t.x;
+		a = x[i*x_len + freq_idx];
+		a.x -= b.x;
+		a.y -= b.y;
+		x[i*x_len + freq_idx] = a;
+	}
+		
+}
+
 /*
 sum(k,j) = sum(x[k,i]* d[k,i,j])  loop i=0..row-1. k=0..freq_len-1, j=0..179
 y(k,j) = abs(sum(k,j)^2
@@ -142,10 +165,10 @@ __global__ void cuda_freq_space_filter(cufftComplex * __restrict x, int x_len, i
 		t.x = d.x * xc_smem[i].x - d.y * xc_smem[i].y;
 		t.y = d.x * xc_smem[i].y + d.y * xc_smem[i].x; //t=d*xc_smem
 		sum.x += t.x;
-		sum.y += t.y;
+		sum.y += t.y; //sum += xc_smem *e^(j*delay)
 	}
 
-	y[freq_idx*y_len + angle_idx] = (sum.x /row) * (sum.x/row) + (sum.y/row) * (sum.y/row);
+	y[freq_idx*y_len + angle_idx] = (sum.x /row) * (sum.x/row) + (sum.y/row) * (sum.y/row); //y = norm(sum)
 
 }
 
@@ -533,7 +556,8 @@ SpaceFilterFreqGPU::~SpaceFilterFreqGPU()
 	cudaFreeHost(dbg_array_cpu);
 }
 
-void SpaceFilterFreqGPU::process(const float * pcm_in, float * pcm_out, int start_freq, int freq_num, float mic_d)
+void SpaceFilterFreqGPU::process(const float * pcm_in, float * pcm_out, int start_freq, int freq_num, float mic_d,
+	bool cancel_noise_enable, float noise_angle, int cd)
 {
 	int cudaStatus;
 
@@ -541,6 +565,7 @@ void SpaceFilterFreqGPU::process(const float * pcm_in, float * pcm_out, int star
 	cudaStatus = cufftExecR2C(fft_analyze, input_gpu, input_fft_gpu);
 	if (cudaStatus != CUFFT_SUCCESS)
 		fprintf(stderr, "cufftExecR2C sig_fs_2s_cbf_gpu failed!");
+		
 #if CHENYU_DBG & 32
 	cudaMemcpy(dbg_array_cpu, input_fft_gpu,
 		(sample_num + 2) * channel_num * sizeof(float), cudaMemcpyDeviceToHost);
@@ -566,7 +591,13 @@ void SpaceFilterFreqGPU::process(const float * pcm_in, float * pcm_out, int star
 	}
 #endif
 
-	cuda_freq_space_filter << <freq_num, 180, channel_num*sizeof(cufftComplex), 0 >> > (
+	if (cancel_noise_enable) {	
+		cuda_freq_cancel_noise << <1, freq_num >> > (input_fft_gpu, sample_num / 2 + 1, start_freq,
+			noise_angle, channel_num, mic_d, cd);
+		cuda_freq_space_filter << <freq_num, 180, channel_num*sizeof(cufftComplex), 0 >> > (
+			input_fft_gpu, sample_num / 2 + 1, start_freq, output_cbf_gpu, 180, channel_num - cd, mic_d);
+	} else
+		cuda_freq_space_filter << <freq_num, 180, channel_num*sizeof(cufftComplex), 0 >> > (
 		input_fft_gpu, sample_num / 2 + 1, start_freq, output_cbf_gpu, 180, channel_num, mic_d);
 	if (cudaGetLastError() != cudaSuccess)
 		fprintf(stderr, "cuda_freq_space_filter launch failed\n");

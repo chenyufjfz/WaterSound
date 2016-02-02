@@ -341,7 +341,7 @@ public:
 
 class SpaceFilterFreqGPU {
 protected:
-	int channel_num, sample_num;
+	int channel_num, sample_num;	
 	float * input_gpu;
 	cufftComplex * input_fft_gpu;
 	float * output_cbf_gpu;
@@ -356,7 +356,8 @@ protected:
 public:
 	SpaceFilterFreqGPU(int channel, int sample=16000);
 	~SpaceFilterFreqGPU();
-	void process(const float * pcm_in, float * pcm_out, int start_freq, int freq_num, float mic_d);
+	void process(const float * pcm_in, float * pcm_out, int start_freq, int freq_num, 
+		float mic_d, bool cancel_noise_enable, float noise_angle, int cd);
 };
 
 class SpaceFilterCPU : public SpaceFilter
