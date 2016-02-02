@@ -3,6 +3,7 @@
 #include "device_launch_parameters.h"
 #include "SpaceFilter.h"
 #include "math.h"
+#include <complex>
 #define __CUDA_ARCH__ 300
 #if __CUDA_ARCH__ >= 300
 #define APT 45
@@ -59,7 +60,7 @@ __global__ void cuda_cancel_noise(float * __restrict x, int x_len,
 }
 
 /*
-y(k,j) = sum(x(i,offset[i,k]+j*up)), i=0..row, k=0..179, offset is space filter delay
+y(k,j) = sum(x[i,offset[i,k]+j*up]), loop i=0..row-1. k=0..179,j is PCM index. offset is space filter delay
 thread is used for one pcm point and APT angles
 Grid.x is for pcm
 Grid.y is for angle group
@@ -68,6 +69,7 @@ y_len: input one row length of y
 x: input seperate channel pcm
 y: output space filter pcm, [180 * ]
 len: output one line length
+row: channel number
 */
 __global__ void cuda_space_filter(float * __restrict x, int x_len, 
 	float * __restrict y, int y_len, int up, int len, int row)
@@ -110,7 +112,45 @@ __global__ void cuda_space_filter(float * __restrict x, int x_len,
 }
 
 /*
-	x(i) = x(i) * target(i) / FFT_LEN
+sum(k,j) = sum(x[k,i]* d[k,i,j])  loop i=0..row-1. k=0..freq_len-1, j=0..179
+y(k,j) = abs(sum(k,j)^2
+thread.x(j) is for angle
+grid.x(k) is for freq
+row: channel number, must <=180
+*/
+__global__ void cuda_freq_space_filter(cufftComplex * __restrict x, int x_len, int freq_start,
+	float * __restrict y, int y_len, int row, float mic_d)
+{
+
+	int angle_idx = threadIdx.x;
+	int freq_idx = blockIdx.x;
+	cufftComplex sum;
+	extern __shared__ cufftComplex xc_smem[];
+
+	if (threadIdx.x < row)
+		xc_smem[threadIdx.x] = x[threadIdx.x*x_len + freq_idx + freq_start];
+	sum.x = sum.y = 0;
+	__syncthreads();
+
+	float t_array = mic_d * cos(pi * angle_idx / 180) / 1500 * 2 * pi;
+
+	for (int i = 0; i < row; i++) {
+		cufftComplex t, d;
+		float delay = t_array * (freq_idx + freq_start)*i;
+		d.x = cos(delay);
+		d.y = sin(delay); //d = e^(j*delay)
+		t.x = d.x * xc_smem[i].x - d.y * xc_smem[i].y;
+		t.y = d.x * xc_smem[i].y + d.y * xc_smem[i].x; //t=d*xc_smem
+		sum.x += t.x;
+		sum.y += t.y;
+	}
+
+	y[freq_idx*y_len + angle_idx] = (sum.x /row) * (sum.x/row) + (sum.y/row) * (sum.y/row);
+
+}
+
+/*
+	x(i) = x(i) * target(i)
 */
 __global__ void cuda_multiply(cufftComplex * __restrict x, int x_len, int len)
 {
@@ -227,7 +267,12 @@ SpaceFilterGPU::~SpaceFilterGPU()
 {
 	cudaFree(sig_array40_gpu);
 	cudaFree(sig_3fs_array40_gpu);
+	cudaFree(sig_offset_array40_gpu);
+	cudaFree(sig_fs_2s_cbf_gpu);
+	cudaFree(sig_freq_gpu);
+	cudaFree(sig_conv_gpu);
 	cudaFreeHost(sig_array40_cpu);
+	cudaFreeHost(dbg_array_cpu);
 	for (int i = 0; i < channel_num; i++)
 		cudaStreamDestroy(stream[i]);
 	cudaDeviceReset();
@@ -434,10 +479,104 @@ void SpaceFilterGPU::process(const vector<float *> pcm_in, vector<float *> pcm_o
 	cancel_noise();
 	space_filter();
 	convol();
-#if 1
+#if 1	
+	cudaMemcpy(dbg_array_cpu, sig_conv_gpu,
+		FFT_LEN * 180 * sizeof(float), cudaMemcpyDeviceToHost);
 	for (int i = 0; i < 180; i++)
 		for (int j = 0; j < 2000; j++)
 			pcm_out[i][j] = dbg_array_cpu[i*FFT_LEN + target_len - 1 + j] / 4096;
 #endif
 }
 
+SpaceFilterFreqGPU::SpaceFilterFreqGPU(int channel, int sample)
+{
+	channel_num = channel;
+	sample_num = 16000;
+	if (cufftPlan1d(&fft_analyze, sample_num, CUFFT_R2C, channel) != CUFFT_SUCCESS)
+		fprintf(stderr, "CUFFT error: Plan fft conv creation failed");
+
+	int cudaStatus = cudaMalloc((void**)&input_fft_gpu, (sample_num + 2) * channel_num * sizeof(float));
+	if (cudaStatus != cudaSuccess)
+		fprintf(stderr, "cudaMalloc device input_fft_gpu failed!");
+
+	cudaStatus = cudaMalloc((void**)&input_gpu, sample_num * channel_num * sizeof(float));
+	if (cudaStatus != cudaSuccess)
+		fprintf(stderr, "cudaMalloc device input_gpu failed!");
+	
+	cudaStatus = cudaMalloc((void**)&output_cbf_gpu, 100 * 180 * sizeof(float));
+	if (cudaStatus != cudaSuccess)
+		fprintf(stderr, "cudaMalloc device output_cbf_gpu failed!");
+
+#if CHENYU_DBG
+	cudaStatus = cudaMallocHost((void**)&dbg_array_cpu, (sample_num + 2) * channel_num * sizeof(float));
+	if (cudaStatus != cudaSuccess)
+		fprintf(stderr, "cudaMalloc host x failed!");
+#endif
+
+#if CHENYU_DBG & 32
+	f_dump_fft = fopen("input_fft.txt", "wt");
+	if (f_dump_fft == NULL)
+		fprintf(stderr, "open gpu_upsample.txt failed\n");
+#endif
+#if CHENYU_DBG & 64
+	f_dump_cbf = fopen("output_cbf.txt", "wt");
+	if (f_dump_cbf == NULL)
+		fprintf(stderr, "open gpu_upsample.txt failed\n");
+#endif
+}
+
+SpaceFilterFreqGPU::~SpaceFilterFreqGPU()
+{
+	cudaFree(input_fft_gpu);
+	cudaFree(input_gpu);
+	cudaFree(output_cbf_gpu);
+	cudaFreeHost(dbg_array_cpu);
+}
+
+void SpaceFilterFreqGPU::process(const float * pcm_in, float * pcm_out, int start_freq, int freq_num, float mic_d)
+{
+	int cudaStatus;
+
+	cudaMemcpy(input_gpu, pcm_in, sample_num*channel_num*sizeof(float), cudaMemcpyHostToDevice);
+	cudaStatus = cufftExecR2C(fft_analyze, input_gpu, input_fft_gpu);
+	if (cudaStatus != CUFFT_SUCCESS)
+		fprintf(stderr, "cufftExecR2C sig_fs_2s_cbf_gpu failed!");
+#if CHENYU_DBG & 32
+	cudaMemcpy(dbg_array_cpu, input_fft_gpu,
+		(sample_num + 2) * channel_num * sizeof(float), cudaMemcpyDeviceToHost);
+	for (int i = 0; i < channel_num; i++)
+		for (int j = start_freq*2; j < (start_freq+freq_num)*2; j++)
+			fprintf(f_dump_fft, "%f\n", dbg_array_cpu[i*(sample_num + 2) + j]);
+#endif
+
+#if 0
+	complex<float> a[100];
+	float t_array;
+	for (int i = 0; i < channel_num; i++) {
+		a[i]._Val[0] = dbg_array_cpu[i*(sample_num + 2) + 100];
+		a[i]._Val[1] = dbg_array_cpu[i*(sample_num + 2) + 101];
+	}
+	complex<float> energy[180];
+	for (int angle = 0; angle < 180; angle++) {
+		energy[angle] = 0;
+		t_array = (4 * cos(pi* angle / 180) / 1500) * 2 * pi;
+		for (int i = 0; i < channel_num; i++)
+			energy[angle] += a[i] * exp(complex<float>(0,1)*t_array*(float)(50*i));
+		printf("%f\n", norm(energy[angle]/(float)channel_num));
+	}
+#endif
+
+	cuda_freq_space_filter << <freq_num, 180, channel_num*sizeof(cufftComplex), 0 >> > (
+		input_fft_gpu, sample_num / 2 + 1, start_freq, output_cbf_gpu, 180, channel_num, mic_d);
+	if (cudaGetLastError() != cudaSuccess)
+		fprintf(stderr, "cuda_freq_space_filter launch failed\n");
+
+	cudaStatus = cudaMemcpy(pcm_out, output_cbf_gpu, freq_num * 180 * sizeof(float), cudaMemcpyDeviceToHost);
+	if (cudaStatus != CUFFT_SUCCESS)
+		fprintf(stderr, "cufftExecR2C sig_fs_2s_cbf_gpu failed!");
+#if CHENYU_DBG & 64
+	for (int i = 0; i<freq_num; i++)
+		for (int j = 0; j < 180; j++)
+			fprintf(f_dump_cbf, "%f\n", pcm_out[i * 180 + j]);
+#endif
+}

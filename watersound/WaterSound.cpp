@@ -406,7 +406,79 @@ void watersound_set_target(void * context, float * target, int target_len)
 	space_filter->set_target(target, target_len);
 }
 
+void * init_watersound_freq_processContext()
+{
+	SpaceFilterFreqGPU * space_freq_filter = new SpaceFilterFreqGPU(CHANNEL_NUM, 16000);
+	return (void *)space_freq_filter;
+}
+
+void watersound_freq_process(void * context, float * input1, float * input2, float * output1, float * output2)
+{
+	if (context == NULL)
+		return;
+	SpaceFilterFreqGPU * space_freq_filter = (SpaceFilterFreqGPU *)context;
+	//space_freq_filter->process(input1, output1, 10, 91, 4);
+	space_freq_filter->process(input2, output2, 399, 3, 2);
+}
+
 #ifndef STATIC_LIB
+void test1()
+{
+#define target_len 100
+	float target[target_len];
+	void * space_filter_gpu = init_watersound_processContext(true);
+	void * space_filter_cpu = init_watersound_processContext(false);
+	for (int i = 0; i < target_len; i++)
+		target[i] = rand() % 16;
+	watersound_set_target(space_filter_cpu, target, target_len);
+	watersound_set_target(space_filter_gpu, target, target_len);
+	vector <float> input, input1;
+	vector <float> output(180 * 2000);
+	generate_pcm_in(CHANNEL_NUM, 16000, input);
+	generate_pcm_in(CHANNEL_NUM, 16000, input1);
+	clock_t t0 = clock();
+	watersound_process(space_filter_gpu, &input[0], &output[0]);
+	watersound_process(space_filter_gpu, &input[0], &output[0]);
+	watersound_process(space_filter_gpu, &input1[0], &output[0]);
+	watersound_process(space_filter_gpu, &input1[0], &output[0]);
+	watersound_process(space_filter_gpu, &input[0], &output[0]);
+	clock_t t1 = clock();
+	watersound_process(space_filter_cpu, &input[0], &output[0]);
+	watersound_process(space_filter_cpu, &input[0], &output[0]);
+	watersound_process(space_filter_cpu, &input1[0], &output[0]);
+	watersound_process(space_filter_cpu, &input1[0], &output[0]);
+	watersound_process(space_filter_cpu, &input[0], &output[0]);
+	clock_t t2 = clock();
+	printf("finished, gpu time=%f, cpu time=%f\n", (double)(t1 - t0) / CLOCKS_PER_SEC, (double)(t2 - t1) / CLOCKS_PER_SEC);	
+}
+
+void test2()
+{
+	void * space_filter_gpu = init_watersound_freq_processContext();
+	float t1_yanci, t2_yanci;
+	t1_yanci = -cos(30 * pi / 180) * 4 / 1500;
+	t2_yanci = -cos(70 * pi / 180) * 4 / 1500;
+	vector <float> input1, input2, output1, output2;
+	input1.resize(40 * 16000);
+	output1.resize(91 * 180);
+	for (int i = 0; i < 40; i++)
+		for (int j = 0; j < 16000; j++)
+			input1[i * 16000 + j] = cos(2 * pi * 50 * (j+1 + (i+1)*t1_yanci*16000)/16000) * 10 + 
+			cos(2 * pi * 50 * (j+1 + (i+1)*t2_yanci*16000)/16000);
+	input2.resize(40 * 16000);
+	output2.resize(3 * 180);
+	t1_yanci = -cos(30 * pi / 180) * 2 / 1500;
+	t2_yanci = -cos(70 * pi / 180) * 2 / 1500;
+	for (int i = 0; i < 40; i++)
+		for (int j = 0; j < 16000; j++)
+			input2[i * 16000 + j] = cos(2 * pi * 400 * (j + 1 + (i + 1)*t1_yanci * 16000) / 16000) * 10 +
+			cos(2 * pi * 400 * (j + 1 + (i + 1)*t2_yanci * 16000) / 16000);
+	clock_t t0 = clock();
+	watersound_freq_process(space_filter_gpu, &input1[0], &input2[0], &output1[0], &output2[0]);
+	clock_t t1 = clock();
+	printf("finished, gpu time=%f\n", (double)(t1 - t0) / CLOCKS_PER_SEC);
+}
+
 int main()
 {
 	/*
@@ -471,35 +543,8 @@ int main()
 		for (int j = 0; j < NX; j++)
 			printf("%f: %f\n", xx[i][j], x[i][j]);
 	}
-		
-	getchar();
-	return 0;*/
-#define target_len 100
-	float target[target_len];
-	void * space_filter_gpu = init_watersound_processContext(true);
-	void * space_filter_cpu = init_watersound_processContext(false);
-	for (int i = 0; i < target_len; i++)
-		target[i] = rand() % 16;
-	watersound_set_target(space_filter_cpu, target, target_len);
-	watersound_set_target(space_filter_gpu, target, target_len);
-	vector <float> input, input1;
-	vector <float> output(180*2000);
-	generate_pcm_in(CHANNEL_NUM, 16000, input);
-	generate_pcm_in(CHANNEL_NUM, 16000, input1);
-	clock_t t0 = clock();
-	watersound_process(space_filter_gpu, &input[0], &output[0]);
-	watersound_process(space_filter_gpu, &input[0], &output[0]);
-	watersound_process(space_filter_gpu, &input1[0], &output[0]);
-	watersound_process(space_filter_gpu, &input1[0], &output[0]);
-	watersound_process(space_filter_gpu, &input[0], &output[0]);
-	clock_t t1 = clock();
-	watersound_process(space_filter_cpu, &input[0], &output[0]);
-	watersound_process(space_filter_cpu, &input[0], &output[0]);
-	watersound_process(space_filter_cpu, &input1[0], &output[0]);
-	watersound_process(space_filter_cpu, &input1[0], &output[0]);
-	watersound_process(space_filter_cpu, &input[0], &output[0]);
-	clock_t t2 = clock();
-	printf("finished, gpu time=%f, cpu time=%f\n", (double)(t1 - t0) / CLOCKS_PER_SEC, (double)(t2 - t1) / CLOCKS_PER_SEC);
+*/
+	test2(); 
 	getchar();
 	return 0;
 }

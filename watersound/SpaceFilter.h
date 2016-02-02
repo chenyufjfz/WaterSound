@@ -7,7 +7,8 @@
 #include "cufft.h"
 using namespace std;
 
-#define CHENYU_DBG 0xff11
+//Now CHENYU_DBG shouldn't be 0, because I use dbg_array_cpu for copy
+#define CHENYU_DBG 0xff61
 #define CHANNEL_NUM 40
 #define FFT_LEN 4096
 #define pi 3.1415926535f
@@ -336,6 +337,26 @@ public:
 	void space_filter();
 	void convol();
 	void process(const vector<float *> pcm_in, vector<float *> pcm_out);
+};
+
+class SpaceFilterFreqGPU {
+protected:
+	int channel_num, sample_num;
+	float * input_gpu;
+	cufftComplex * input_fft_gpu;
+	float * output_cbf_gpu;
+	float * dbg_array_cpu;
+	cufftHandle fft_analyze;
+#if CHENYU_DBG & 32
+	FILE * f_dump_fft;
+#endif
+#if CHENYU_DBG & 64
+	FILE * f_dump_cbf;
+#endif
+public:
+	SpaceFilterFreqGPU(int channel, int sample=16000);
+	~SpaceFilterFreqGPU();
+	void process(const float * pcm_in, float * pcm_out, int start_freq, int freq_num, float mic_d);
 };
 
 class SpaceFilterCPU : public SpaceFilter
