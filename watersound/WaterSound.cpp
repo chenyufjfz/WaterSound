@@ -7,7 +7,7 @@
 #include <time.h>
 
 
-static short N_t[180 * 40] = { 0, 64, 128, 192, 256, 320, 384, 448, 512, 576, 640, 704, 768, 832, 896, 960, 1024,
+static short N_t[180 * CHANNEL_NUM] = { 0, 64, 128, 192, 256, 320, 384, 448, 512, 576, 640, 704, 768, 832, 896, 960, 1024,
 1088, 1152, 1216, 1280, 1344, 1408, 1472, 1536, 1600, 1664, 1728, 1792, 1856, 1920, 1984, 2048, 2112,
 2176, 2240, 2304, 2368, 2432, 2496, 0, 64, 128, 192, 256, 320, 384, 448, 512, 576, 640, 704, 768, 832,
 896, 960, 1024, 1088, 1152, 1216, 1280, 1344, 1408, 1472, 1536, 1600, 1664, 1728, 1792, 1856, 1920, 1984,
@@ -372,10 +372,10 @@ void generate_pcm_in(int channel, int sample, vector<float> &input)
 void * init_watersound_processContext(bool gpu)
 {
 	SpaceFilter * space_filter;
-	short nt_reverse[180 * 40];
+	short nt_reverse[180 * CHANNEL_NUM];
 	for (int i = 0; i < 180; i++)
-		for (int j = 0; j < 40; j++)
-			nt_reverse[i * 40 + j]= N_t[(179 - i) * 40 + j];
+		for (int j = 0; j < CHANNEL_NUM; j++)
+			nt_reverse[i * CHANNEL_NUM + j] = N_t[(179 - i) * CHANNEL_NUM + j];
 	if (gpu)
 		space_filter = new SpaceFilterGPU(CHANNEL_NUM, 16000);
 	else
@@ -430,13 +430,13 @@ void watersound_freq_set_noise_para(void *context, bool enable1, float angle1, b
 	s_angle = angle2;
 }
 
-void watersound_freq_process(void * context, float * input1, float * input2, float * output1, float * output2)
+void watersound_freq_process(void * context, float * input1, float * input2, float * output1, float * output2, int start_freq, int freq_num)
 {
 	if (context == NULL)
 		return;
 	SpaceFilterFreqGPU * space_freq_filter = (SpaceFilterFreqGPU *)context;
 	space_freq_filter->process(input1, output1, 10, 91, 4, l_enable, l_angle, 2);
-	//space_freq_filter->process(input2, output2, 399, 3, 2, s_enable, s_angle, 1);
+	space_freq_filter->process(input2, output2, start_freq, freq_num, 2, s_enable, s_angle, 1);
 }
 
 #ifndef STATIC_LIB
@@ -478,22 +478,22 @@ void test2()
 	t1_yanci = -cos(30 * pi / 180) * 4 / 1500;
 	t2_yanci = -cos(70 * pi / 180) * 4 / 1500;
 	vector <float> input1, input2, output1, output2;
-	input1.resize(40 * 16000);
+	input1.resize(CHANNEL_NUM * 16000);
 	output1.resize(91 * 180);
-	for (int i = 0; i < 40; i++)
+	for (int i = 0; i < CHANNEL_NUM; i++)
 		for (int j = 0; j < 16000; j++)
 			input1[i * 16000 + j] = cos(2 * pi * 50 * (j+1 + (i+1)*t1_yanci*16000)/16000) * 10 + 
 			cos(2 * pi * 50 * (j+1 + (i+1)*t2_yanci*16000)/16000);
-	input2.resize(40 * 16000);
+	input2.resize(CHANNEL_NUM * 16000);
 	output2.resize(3 * 180);
 	t1_yanci = -cos(30 * pi / 180) * 2 / 1500;
 	t2_yanci = -cos(70 * pi / 180) * 2 / 1500;
-	for (int i = 0; i < 40; i++)
+	for (int i = 0; i < CHANNEL_NUM; i++)
 		for (int j = 0; j < 16000; j++)
 			input2[i * 16000 + j] = cos(2 * pi * 400 * (j + 1 + (i + 1)*t1_yanci * 16000) / 16000) * 10 +
 			cos(2 * pi * 400 * (j + 1 + (i + 1)*t2_yanci * 16000) / 16000);
 	clock_t t0 = clock();
-	watersound_freq_process(space_filter_gpu, &input1[0], &input2[0], &output1[0], &output2[0]);
+	watersound_freq_process(space_filter_gpu, &input1[0], &input2[0], &output1[0], &output2[0],399,3);
 	clock_t t1 = clock();
 	printf("finished, gpu time=%f\n", (double)(t1 - t0) / CLOCKS_PER_SEC);
 }
@@ -563,7 +563,7 @@ int main()
 			printf("%f: %f\n", xx[i][j], x[i][j]);
 	}
 */
-	test2(); 
+	test1(); 
 	getchar();
 	return 0;
 }

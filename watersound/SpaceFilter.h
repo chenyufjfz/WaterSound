@@ -8,7 +8,7 @@
 using namespace std;
 
 //Now CHENYU_DBG shouldn't be 0, because I use dbg_array_cpu for copy
-#define CHENYU_DBG 0xff61
+#define CHENYU_DBG 0xfff1
 #define CHANNEL_NUM 40
 #define FFT_LEN 4096
 #define pi 3.1415926535f
@@ -327,7 +327,7 @@ protected:
 	FILE * f_dump_conv;
 #endif
 public:
-	SpaceFilterGPU(int channel = 40, int sample = 16000);
+	SpaceFilterGPU(int channel = CHANNEL_NUM, int sample = 16000);
 	~SpaceFilterGPU();
 	void upsample(const vector<float *> pcm_in);
 	void set_noise_para(bool para0, float angle);	
@@ -366,10 +366,10 @@ protected:
 	int rise_fs;	
 	int target_len;
 	float sig_matching_C_GPU[16000];
-	float sig_3fs_array40_GPU[40][16000 * 3 + 255];   
-	float sig_3fs_OK_array40_GPU[40][16000 * 3 * 2];  
-	float sig_offset_array40_GPU[40][16000 * 3 * 2];  
-	int indew_CBF_time[180][40];        
+	float sig_3fs_array40_GPU[CHANNEL_NUM][16000 * 3 + 255];
+	float sig_3fs_OK_array40_GPU[CHANNEL_NUM][16000 * 3 * 2];
+	float sig_offset_array40_GPU[CHANNEL_NUM][16000 * 3 * 2];
+	int indew_CBF_time[180][CHANNEL_NUM];
 
 	float sig_3fs_2s_CBF_GPU[180][FFT_LEN +FFT_LEN/2]; 
 	float sig_3fs_2s_CBF_matching_GPU[180][2000]; 
@@ -390,7 +390,7 @@ protected:
 	FILE * f_dump_conv;
 #endif
 public:
-	SpaceFilterCPU(int channel = 40, int sample = 16000);
+	SpaceFilterCPU(int channel = CHANNEL_NUM, int sample = 16000);
 	~SpaceFilterCPU();
 	void upsample(const vector<float *> pcm_in);
 	void set_noise_para(bool para0, float angle);

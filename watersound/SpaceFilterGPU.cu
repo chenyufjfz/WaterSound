@@ -15,9 +15,9 @@
 #define M 4
 
 
-__constant__ __device__ short indew_CBF_time_gpu[40 * 180+30];
-__constant__ __device__ short indew_time_load_offset_gpu[40 * ANGLE_GROUP];
-__constant__ __device__ unsigned short indew_time_load_size_gpu[40 * ANGLE_GROUP];
+__constant__ __device__ short indew_CBF_time_gpu[CHANNEL_NUM * 180+30];
+__constant__ __device__ short indew_time_load_offset_gpu[CHANNEL_NUM * ANGLE_GROUP];
+__constant__ __device__ unsigned short indew_time_load_size_gpu[CHANNEL_NUM * ANGLE_GROUP];
 __constant__ __device__ cufftComplex target_freq_gpu[FFT_LEN / 2 + 1];
 
 #if 0
@@ -385,18 +385,18 @@ void SpaceFilterGPU::cancel_noise()
 
 void SpaceFilterGPU::set_sf_para(short *delay)
 {
-	short indew_CBF_time[40 * 180];
-	short indew_time_load_offset[40 * ANGLE_GROUP];
-	unsigned short indew_time_load_size[40 * ANGLE_GROUP];
+	short indew_CBF_time[CHANNEL_NUM * 180];
+	short indew_time_load_offset[CHANNEL_NUM * ANGLE_GROUP];
+	unsigned short indew_time_load_size[CHANNEL_NUM * ANGLE_GROUP];
 
 	for (int i = 0; i < channel_num; i++)
 		for (int j = 0; j < 180; j++) 
 		{
 			indew_time_load_offset[i*ANGLE_GROUP + j / APT] = 
-				delay[j / APT*APT * 40 + i + 1] - delay[j / APT*APT * 40 + i];
-			indew_CBF_time[i * 180 + j] = delay[j * 40 + i] - delay[j / APT*APT * 40 + i];
+				delay[j / APT*APT * CHANNEL_NUM + i + 1] - delay[j / APT*APT * CHANNEL_NUM + i];
+			indew_CBF_time[i * 180 + j] = delay[j * CHANNEL_NUM + i] - delay[j / APT*APT * CHANNEL_NUM + i];
 			int j_1 = (j / APT *APT + APT - 1 >= 180) ? (180 - 1) : j / APT *APT + APT - 1;
-			indew_time_load_size[i*ANGLE_GROUP + j / APT] = delay[j_1 * 40 + i] - delay[j / APT*APT * 40 + i] + 1024 * UP;
+			indew_time_load_size[i*ANGLE_GROUP + j / APT] = delay[j_1 * CHANNEL_NUM + i] - delay[j / APT*APT * CHANNEL_NUM + i] + 1024 * UP;
 		}		
 
 #if CHENYU_DBG & 128

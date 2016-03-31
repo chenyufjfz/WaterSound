@@ -146,7 +146,7 @@ void SpaceFilterCPU::set_sf_para(short *delay)
 {
 	for (int i = 0; i < 180; i++)
 		for (int j = 0; j < channel_num; j++)
-			indew_CBF_time[i][j] = delay[i*40 + j];
+			indew_CBF_time[i][j] = delay[i*CHANNEL_NUM + j];
 }
 
 void SpaceFilterCPU::space_filter()
